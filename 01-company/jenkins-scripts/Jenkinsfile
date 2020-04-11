@@ -1,0 +1,20 @@
+pipeline {
+    agent { docker { image 'python:2.7' } }
+    stages {
+        stage('Checkout source code') {
+            steps {
+                git(
+                    url: 'https://github.com/beerkeeper/python-ip-script.git'
+                )
+            }
+        }
+        stage('Run script') {
+            steps {
+                withEnv(["HOME=${env.WORKSPACE}"]) {
+                    sh '''pip install -r requirements.txt --user
+                    python main.py'''
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,5 @@
+---
+# defaults file for docker-mariadb
+mariadb_port: 3036
+mariadb_version: 10.2.14
+mariadb_container_name: mariadb
