@@ -12,6 +12,70 @@ First of all, the databases should also be set up according to the principle of 
 
 ## Solution
 
+### Calico
+
+Calico has network policy to limit traffic to/from external non-Calico workloads or networks.
+So we can disable access from all resources to MondoDB:
+```
+apiVersion: projectcalico.org/v3
+kind: NetworkPolicy
+metadata:
+  name: deny-egress-external
+  namespace: default
+spec:
+  selector: all()
+  types:
+    - Egress
+  egress:    
+    - action: DENY
+      destination:
+        nets:
+        - $MONGO_DB_IP/32
+```
+Then allow for specific applications:
+```
+apiVersion: projectcalico.org/v3
+kind: NetworkPolicy
+metadata:
+  name: deny-egress-external
+  namespace: default
+spec:
+  selector:
+    service: app1
+  types:
+    - Egress
+  egress:    
+    - action: ALLOW
+      destination:
+        nets:
+        - $MONGO_DB_IP/32
+```
+Also we can use `GlobalNetworkPolicy` which is not a namespaced resource.
+
+pros: simple to set up; great flexibility.
+cons: additional layer to manage.
+
+### AWS EC2 security groups
+
+AWS has the ability to assign specific EC2 security groups directly to pods running in Amazon EKS clusters.
+There are some steps how to achieve it:
+POD ENIs should be enabled:
+`kubectl set env daemonset -n kube-system aws-node ENABLE_POD_ENI=true`
+Create IAM policy that allows access to RDS/EC2, for example RDS action: `rds-db:connect`.
+Create IAM ServiceAccount with OIDC directed to created policy from the previous step. Create SecurityGroupPolicy with serviceAccountSelector and SG IDs (they can be get via `aws eks describe-cluster --name sgp-cluster --query "cluster resourcesVpcConfig.clusterSecurityGroupId" --output text`).
+After all, applications that have a ServiceAccount label that matches the filter in SecurityGroupPolicy should have access to RDS DB.
+
+proc: no additional software needed.
+cons: complicated configuration; works only on AWS EKS.
+
+
+### Separate Node Group
+
+We can spin up a separate node group for specific pods and configure its taint and affinity rules, so pods are scheduled on the node group. The node group has a Security Group attached with permissions to access MongoDB instance and RDS instance.
+
+proc: no additional software needed.
+cons: for each application with diff network policy - own node group (might be expensive).
+
 ### Istio
 
 Install Service Mesh Istio into the cluster with `meshConfig.outboundTrafficPolicy.mode` set to
@@ -57,70 +121,19 @@ spec:
 ```
 This means that we allow services with the label above access to the MongoDB. The same can be done for RDS instance.
 
-### Calico
-
-Calico has network policy to limit traffic to/from external non-Calico workloads or networks.
-So we can disable access from all resources to MondoDB:
-```
-apiVersion: projectcalico.org/v3
-kind: NetworkPolicy
-metadata:
-  name: deny-egress-external
-  namespace: default
-spec:
-  selector: all()
-  types:
-    - Egress
-  egress:    
-    - action: DENY
-      destination:
-        nets:
-        - $MONGO_DB_IP/32
-```
-Then allow for specific applications:
-```
-apiVersion: projectcalico.org/v3
-kind: NetworkPolicy
-metadata:
-  name: deny-egress-external
-  namespace: default
-spec:
-  selector:
-    service: app1
-  types:
-    - Egress
-  egress:    
-    - action: ALLOW
-      destination:
-        nets:
-        - $MONGO_DB_IP/32
-```
-Also we can use `GlobalNetworkPolicy` which is not a namespaced resource.
-
-### AWS EC2 security groups
-
-AWS has the ability to assign specific EC2 security groups directly to pods running in Amazon EKS clusters.
-There are some steps how to achieve it:
-POD ENIs should be enabled:
-`kubectl set env daemonset -n kube-system aws-node ENABLE_POD_ENI=true`
-Create IAM policy that allows access to RDS/EC2, for example RDS action: `rds-db:connect`.
-Create IAM ServiceAccount with OIDC directed to created policy from the previous step. Create SecurityGroupPolicy with serviceAccountSelector and SG IDs (they can be get via `aws eks describe-cluster --name sgp-cluster --query "cluster resourcesVpcConfig.clusterSecurityGroupId" --output text`).
-After all, applications that have a ServiceAccount label that matches the filter in SecurityGroupPolicy should have access to RDS DB.
-
-### Separate Node Group
-
-We can spin up a separate node group for specific pods and configure its taint and affinity rules, so pods are scheduled on the node group. The node group has a Security Group attached with permissions to access MongoDB EC2 instance and RDS instance.
+pros: flexible.
+cons: complicated configuration; enabling `REGISTRY_ONLY` option block all access to external services, so we need to add VirtualService for each external host is needed.
 
 
 ## Links
-
-[Istio]
-https://istio.io/latest/docs/reference/config/networking/service-entry/
-
-[Istio] https://istio.io/latest/docs/tasks/traffic-management/egress/egress-control/
 
 [Calico] https://docs.projectcalico.org/security/calico-network-policy
 
 [Calico] https://docs.projectcalico.org/reference/resources/globalnetworkpolicy
 
 [AWS EC2 security groups] https://aws.amazon.com/blogs/containers/introducing-security-groups-for-pods/
+
+[Istio]
+https://istio.io/latest/docs/reference/config/networking/service-entry/
+
+[Istio] https://istio.io/latest/docs/tasks/traffic-management/egress/egress-control/
